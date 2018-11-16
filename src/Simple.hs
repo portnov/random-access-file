@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 module Simple where
 
 import Control.Monad
@@ -14,7 +15,9 @@ data Simple = Simple Handle
   deriving (Eq, Show)
 
 instance FileAccess Simple where
-  mkFile path = do
+  data AccessParams Simple = SimpleParams
+
+  mkFile _ path = do
     handle <- openFile path ReadWriteMode
     return $ Simple handle
 

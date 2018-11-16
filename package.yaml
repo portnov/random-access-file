@@ -28,6 +28,7 @@ dependencies:
 - stm
 - unix
 - unix-bytestring
+- unix-memory
 - concurrent-extra
 
 executables:

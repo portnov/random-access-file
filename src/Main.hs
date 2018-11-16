@@ -15,28 +15,14 @@ import Criterion.Main
 
 import Common
 import Simple
+import Threaded
+import MMap
 import Cached
 
-executeSimple :: IO ()
-executeSimple = do
-  h <- mkFile "test.data" :: IO Simple
---   writeZeros h (1024*1024)
+execute :: FileAccess a => AccessParams a -> FilePath -> Bool -> IO ()
+execute params path doClose = do
 
-  replicateM 50 $ do
-    offset <- randomRIO (100, 900*1024)
-    writeData h offset "abdefgh0123456789"
-    return ()
-
-  replicateM 50 $ do
-    offset <- randomRIO (100, 900*1024)
-    readData h offset 512
-    return ()
-
-  close h
-
-executeCached :: IO ()
-executeCached = do
-  h <- mkFile "test.data" :: IO Cached
+  h <- mkFile params path
   -- writeZeros h (1024*1024)
 
   replicateM_ 50 $ do
@@ -49,11 +35,14 @@ executeCached = do
     readData h offset 512
     return ()
 
---   close h
-
+  when doClose $
+    close h
 
 main :: IO ()
 main = defaultMain [
-    bench "simple" $ whnfIO executeSimple
-  , bench "cached" $ whnfIO executeCached
+    bench "simple" $ whnfIO $ execute SimpleParams "test.data" True
+  , bench "threaded" $ whnfIO $ execute (ThreadedParams 4096) "test.data" True
+  , bench "mmaped" $ whnfIO $ execute (MMapedParams 4096) "test.data" True
+  , bench "cached/threaded" $ whnfIO $ execute (CachedBackend $ ThreadedParams 4096) "test.data" False
+  , bench "cached/mmaped" $ whnfIO $ execute (CachedBackend $ MMapedParams 4096) "test.data" False
   ]

@@ -1,5 +1,6 @@
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Cached where
 
@@ -14,7 +15,6 @@ import System.IO
 import System.Random
 import System.Posix.Types
 import System.Posix.IO
-import "unix-bytestring" System.Posix.IO.ByteString
 import Text.Printf
 
 import Common
@@ -32,72 +32,43 @@ instance Show Page where
 --     , qiData :: B.ByteString
 --     }
 
-data AccessType = ReadAccess | WriteAccess
-
 data CacheData = CacheData {
     cdMap :: M.Map Offset Page
   }
 
 type Cache = TVar CacheData
 
-type FileLocks = M.Map Offset RWL.RWLock
-
-data Cached = Cached Fd (TVar FileLocks) Cache
+data Cached a = Cached a QSem Cache
 
 cachePageSize :: Size
 cachePageSize = 4096
 
-withLock :: RWL.RWLock -> AccessType -> IO a -> IO a
-withLock lock ReadAccess action =
-  bracket_
-    (RWL.acquireRead lock)
-    (RWL.releaseRead lock)
-    action
-withLock lock WriteAccess action =
-  bracket_
-    (RWL.acquireWrite lock)
-    (RWL.releaseWrite lock)
-    action
+instance FileAccess a => FileAccess (Cached a) where
+  data AccessParams (Cached a) = CachedBackend (AccessParams a)
 
-underBlockLock :: TVar FileLocks -> AccessType -> Offset -> IO a -> IO a
-underBlockLock locksVar access n action = do
-  newLock <- RWL.new
-  lock <- atomically $ do
-            locks <- readTVar locksVar
-            case M.lookup n locks of
-              Just lock -> return lock
-              Nothing -> do
-                writeTVar locksVar $ M.insert n newLock locks
-                return newLock
-  withLock lock access action
-
-instance FileAccess Cached where
-  mkFile path = do
-      locks <- atomically $ newTVar M.empty
+  mkFile (CachedBackend params) path = do
+      a <- mkFile params path
       var <- atomically $ newTVar $ CacheData M.empty
       let fileMode = Just 0o644
       let flags = defaultFileFlags
-      fd <- openFd path ReadWrite fileMode flags
-      forkIO $ dumpQueue fd locks var
-      return $ Cached fd locks var
+      closeLock <- newQSem 1
+      forkIO $ dumpQueue a closeLock var
+      return $ Cached a closeLock var
     where
-      dumpQueue :: Fd -> TVar FileLocks -> Cache -> IO ()
-      dumpQueue fd locks var = forever $ do
+      dumpQueue a closeLock var = forever $ do
         threadDelay $ 10 * 1000
-        dump <- atomically $ do
+        pages <- atomically $ do
                   cache <- readTVar var
                   let pages = filter (pDirty . snd) $ M.assocs $ cdMap cache
                       cache' = M.map (\p -> p {pDirty = False}) $ cdMap cache
                   writeTVar var $ CacheData cache'
-                  return $ forM_ pages $ \(offset, page) -> do
-                    underBlockLock locks WriteAccess offset $ do
-                      -- printf "Writing: %d, %d\n" offset (B.length $ pData page)
-                      (fdPwrite fd (pData page) (fromIntegral offset) >> return ())
-                        `catch` (\(e :: SomeException) ->
-                                   printf "pwrite: offset %d, len %d: %s\n"
-                                          offset (B.length $ pData page) (show e))
-
-        dump
+                  return pages
+        if null pages
+          then signalQSem closeLock
+          else do 
+            forM_ pages $ \(offset, page) -> do
+                writeData a offset (pData page)
+            syncFile a
                       
   readData handle offset size = do
     let dataOffset0 = offset `mod` cachePageSize
@@ -140,17 +111,20 @@ instance FileAccess Cached where
     forM_ fragments $ \(pageOffset, dataOffset, fragment) ->
         writeDataAligned handle pageOffset dataOffset fragment
 
-  close (Cached fd locks var) = do
-    closeFd fd
+  syncFile (Cached a _ _) = do
+    syncFile a
 
-readDataAligned (Cached fd locks var) pageOffset dataOffset size = do
+  close (Cached a closeLock var) = do
+    waitQSem closeLock
+    close a
+
+readDataAligned (Cached a _ var) pageOffset dataOffset size = do
   mbCached <- atomically $ do
     cache <- readTVar var
     return $ M.lookup pageOffset $ cdMap cache
   case mbCached of
     Nothing -> do
-      page <- underBlockLock locks ReadAccess pageOffset $
-                fdPread fd (fromIntegral cachePageSize) (fromIntegral pageOffset)
+      page <- readData a pageOffset cachePageSize
       let result = B.take size $ B.drop dataOffset page
       lock <- RWL.new
       atomically $ modifyTVar var $ \cache ->
@@ -161,15 +135,14 @@ readDataAligned (Cached fd locks var) pageOffset dataOffset size = do
         let result = B.take size $ B.drop dataOffset $ pData page
         return result
 
-writeDataAligned (Cached fd locks var) pageOffset dataOffset bstr = do
+writeDataAligned (Cached a _ var) pageOffset dataOffset bstr = do
   -- printf "WA: page %d, data %d, len %d\n" pageOffset dataOffset (B.length bstr)
   mbCached <- atomically $ do
     cache <- readTVar var
     return $ M.lookup pageOffset $ cdMap cache
   case mbCached of
     Nothing -> do
-      page <- underBlockLock locks ReadAccess pageOffset $
-                fdPread fd (fromIntegral cachePageSize) (fromIntegral pageOffset)
+      page <- readData a pageOffset cachePageSize
       let page' = B.take dataOffset page `B.append` bstr `B.append` B.drop (dataOffset + B.length bstr) page
       when (B.length page /= B.length page') $
         fail $ printf "W/N: %d /= %d! data: %d, page: %d, len: %d" (B.length page) (B.length page') pageOffset dataOffset (B.length bstr)
