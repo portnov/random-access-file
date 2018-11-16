@@ -25,6 +25,10 @@ dependencies:
 - random
 - bytestring
 - containers
+- stm
+- unix
+- unix-bytestring
+- concurrent-extra
 
 executables:
   iotests-exe:
