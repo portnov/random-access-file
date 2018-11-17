@@ -1,7 +1,7 @@
 # random-access-file README
 
 This package is aimed to provide some number of different implementations of
-random file access members with the same interface.
+random file access methods with the same interface.
 
 It can be of use for implementing multithread read-write random access for
 large files, for example for DB engines.
