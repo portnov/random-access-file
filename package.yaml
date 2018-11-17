@@ -30,6 +30,7 @@ dependencies:
 - unix-bytestring
 - unix-memory
 - concurrent-extra
+- lrucaching
 
 executables:
   iotests-exe:

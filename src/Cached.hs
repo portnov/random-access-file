@@ -11,6 +11,7 @@ import Control.Exception
 import qualified Control.Concurrent.ReadWriteLock as RWL
 import qualified Data.Map as M
 import qualified Data.ByteString as B
+import qualified Data.LruCache as LRU
 import System.IO
 import System.Random
 import System.Posix.Types
@@ -19,11 +20,11 @@ import Text.Printf
 
 import Common
 
-data Page = Page {pDirty :: Bool, pData :: B.ByteString, pLock :: RWL.RWLock}
+data Page = Page {pData :: B.ByteString, pLock :: RWL.RWLock}
   deriving (Eq)
 
 instance Show Page where
-  show p = printf "[Page: %s]" (show $ pDirty p)
+  show p = "[Page]"
 
 -- data WriteQueueItem =
 --     CloseFile
@@ -33,7 +34,8 @@ instance Show Page where
 --     }
 
 data CacheData = CacheData {
-    cdMap :: M.Map Offset Page
+    cdDirty :: M.Map Offset Page
+  , cdClean :: LRU.LruCache Offset Page
   }
 
 type Cache = TVar CacheData
@@ -43,12 +45,36 @@ data Cached a = Cached a QSem Cache
 cachePageSize :: Size
 cachePageSize = 4096
 
+capacity :: Int
+capacity = 40
+
+lookupC :: Offset -> CacheData -> Maybe (Page, CacheData)
+lookupC key c =
+  case M.lookup key (cdDirty c) of
+    Just page -> Just (page, c)
+    Nothing -> case LRU.lookup key (cdClean c) of
+                 Nothing -> Nothing
+                 Just (page, lru') -> Just (page, c {cdClean = lru'})
+
+putDirty :: Offset -> Page -> CacheData -> CacheData
+putDirty key page c =
+  c {cdDirty = M.insert key page (cdDirty c)}
+
+putClean :: Offset -> Page -> CacheData -> CacheData
+putClean key page c =
+  c {cdClean = LRU.insert key page (cdClean c)}
+
+markAllClean :: CacheData -> CacheData
+markAllClean c = c {cdClean = update (cdClean c), cdDirty = M.empty}
+  where
+    update lru = foldr (uncurry LRU.insert) lru (M.assocs $ cdDirty c)
+
 instance FileAccess a => FileAccess (Cached a) where
   data AccessParams (Cached a) = CachedBackend (AccessParams a)
 
   mkFile (CachedBackend params) path = do
       a <- mkFile params path
-      var <- atomically $ newTVar $ CacheData M.empty
+      var <- atomically $ newTVar $ CacheData M.empty (LRU.empty capacity)
       let fileMode = Just 0o644
       let flags = defaultFileFlags
       closeLock <- newQSem 1
@@ -59,9 +85,9 @@ instance FileAccess a => FileAccess (Cached a) where
         threadDelay $ 10 * 1000
         pages <- atomically $ do
                   cache <- readTVar var
-                  let pages = filter (pDirty . snd) $ M.assocs $ cdMap cache
-                      cache' = M.map (\p -> p {pDirty = False}) $ cdMap cache
-                  writeTVar var $ CacheData cache'
+                  let pages = M.assocs $ cdDirty cache
+                      cache' = markAllClean cache
+                  writeTVar var cache'
                   return pages
         if null pages
           then signalQSem closeLock
@@ -121,17 +147,18 @@ instance FileAccess a => FileAccess (Cached a) where
 readDataAligned (Cached a _ var) pageOffset dataOffset size = do
   mbCached <- atomically $ do
     cache <- readTVar var
-    return $ M.lookup pageOffset $ cdMap cache
+    return $ lookupC pageOffset cache
   case mbCached of
     Nothing -> do
       page <- readData a pageOffset cachePageSize
       let result = B.take size $ B.drop dataOffset page
       lock <- RWL.new
       atomically $ modifyTVar var $ \cache ->
-        cache {cdMap = M.insert pageOffset (Page False page lock) (cdMap cache)}
+        putClean pageOffset (Page page lock) cache
       return result
-    Just page -> do
+    Just (page, cache') -> do
       withLock (pLock page) ReadAccess $ do
+        atomically $ writeTVar var cache'
         let result = B.take size $ B.drop dataOffset $ pData page
         return result
 
@@ -139,7 +166,7 @@ writeDataAligned (Cached a _ var) pageOffset dataOffset bstr = do
   -- printf "WA: page %d, data %d, len %d\n" pageOffset dataOffset (B.length bstr)
   mbCached <- atomically $ do
     cache <- readTVar var
-    return $ M.lookup pageOffset $ cdMap cache
+    return $ lookupC pageOffset cache
   case mbCached of
     Nothing -> do
       page <- readData a pageOffset cachePageSize
@@ -148,15 +175,15 @@ writeDataAligned (Cached a _ var) pageOffset dataOffset bstr = do
         fail $ printf "W/N: %d /= %d! data: %d, page: %d, len: %d" (B.length page) (B.length page') pageOffset dataOffset (B.length bstr)
       lock <- RWL.new
       atomically $ modifyTVar var $ \cache ->
-        cache {cdMap = M.insert pageOffset (Page True page' lock) (cdMap cache)}
+        putDirty pageOffset (Page page' lock) cache
 
-    Just page -> do
+    Just (page, cache') -> do
       withLock (pLock page) WriteAccess $ do
         let pageData = pData page
         let pageData' = B.take dataOffset pageData `B.append` bstr `B.append` B.drop (dataOffset + B.length bstr) pageData
-        let page' = page {pDirty = True, pData = pageData'}
+        let page' = page {pData = pageData'}
         when (B.length pageData /= B.length pageData') $
           fail $ printf "W/J: %d /= %d!" (B.length pageData) (B.length pageData')
         atomically $ modifyTVar var $ \cache ->
-          cache {cdMap = M.insert pageOffset page' (cdMap cache)}
+          putDirty pageOffset page' cache
 
