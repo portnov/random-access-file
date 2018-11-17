@@ -46,7 +46,7 @@ instance FileAccess MMaped where
       unsafePackCStringLen (bstrPtr, fromIntegral size)
 
   writeData (MMaped _ ptr _ lockPageSize locks) offset bstr = do
-    let size = B.length bstr
+    let size = fromIntegral $ B.length bstr
         dataOffset0 = offset `mod` lockPageSize
         pageOffset0 = offset - dataOffset0
         dataOffset1 = (offset + size) `mod` lockPageSize

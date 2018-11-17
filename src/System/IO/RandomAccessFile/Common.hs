@@ -9,9 +9,10 @@ import Control.Exception
 import qualified Data.Map as M
 import qualified Data.ByteString as B
 import Data.List
+import Data.Word
 
-type Offset = Int
-type Size = Int
+type Offset = Word64
+type Size = Word64
 
 class FileAccess a where
   data AccessParams a
@@ -27,7 +28,7 @@ class FileAccess a where
 
 writeZeros :: FileAccess a => a -> Size -> IO ()
 writeZeros h size =
-  writeData h 0 $ B.replicate size 0
+  writeData h 0 $ B.replicate (fromIntegral size) 0
 
 data AccessType = ReadAccess | WriteAccess
 

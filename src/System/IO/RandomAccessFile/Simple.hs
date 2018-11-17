@@ -18,7 +18,7 @@ instance FileAccess Simple where
 
   readData (Simple handle) offset size = do
     hSeek handle AbsoluteSeek (fromIntegral offset)
-    bstr <- B.hGet handle size
+    bstr <- B.hGet handle $ fromIntegral size
     return bstr
 
   writeData (Simple handle) offset bstr = do

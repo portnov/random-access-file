@@ -114,7 +114,7 @@ instance FileAccess a => FileAccess (Cached a) where
     return $ B.concat fragments
   
   writeData handle offset bstr = do
-    let size = B.length bstr
+    let size = fromIntegral $ B.length bstr
         cachePageSize = cCachePageSize handle
         dataOffset0 = offset `mod` cachePageSize
         pageOffset0 = offset - dataOffset0
@@ -129,7 +129,7 @@ instance FileAccess a => FileAccess (Cached a) where
                            else (page, 0, cachePageSize)
         fragments = flip map inputs $ \(pageOffset, dataOffset, sz) ->
                       let strOffset = pageOffset + dataOffset - offset
-                          fragment = B.take sz $ B.drop strOffset bstr
+                          fragment = B.take (fromIntegral sz) $ B.drop (fromIntegral strOffset) bstr
                       in  (pageOffset, dataOffset, fragment)
     -- printf "PO: %s\n" (show pageOffsets)
     -- printf "I: %s\n" (show inputs)
@@ -144,6 +144,7 @@ instance FileAccess a => FileAccess (Cached a) where
     waitQSem (cCloseLock handle)
     closeFile (cBackend handle)
 
+readDataAligned :: FileAccess a => Cached a -> Offset -> Offset -> Size -> IO B.ByteString
 readDataAligned handle pageOffset dataOffset size = do
   let a = cBackend handle
       var = cCache handle
@@ -154,7 +155,7 @@ readDataAligned handle pageOffset dataOffset size = do
   case mbCached of
     Nothing -> do
       page <- readData a pageOffset cachePageSize
-      let result = B.take size $ B.drop dataOffset page
+      let result = B.take (fromIntegral size) $ B.drop (fromIntegral dataOffset) page
       lock <- RWL.new
       atomically $ modifyTVar var $ \cache ->
         putClean pageOffset (Page page lock) cache
@@ -162,9 +163,10 @@ readDataAligned handle pageOffset dataOffset size = do
     Just (page, cache') -> do
       withLock (pLock page) ReadAccess $ do
         atomically $ writeTVar var cache'
-        let result = B.take size $ B.drop dataOffset $ pData page
+        let result = B.take (fromIntegral size) $ B.drop (fromIntegral dataOffset) $ pData page
         return result
 
+writeDataAligned :: FileAccess a => Cached a -> Offset -> Offset -> B.ByteString -> IO ()
 writeDataAligned handle pageOffset dataOffset bstr = do
   -- printf "WA: page %d, data %d, len %d\n" pageOffset dataOffset (B.length bstr)
   let a = cBackend handle
@@ -176,7 +178,7 @@ writeDataAligned handle pageOffset dataOffset bstr = do
   case mbCached of
     Nothing -> do
       page <- readData a pageOffset cachePageSize
-      let page' = B.take dataOffset page `B.append` bstr `B.append` B.drop (dataOffset + B.length bstr) page
+      let page' = B.take (fromIntegral dataOffset) page `B.append` bstr `B.append` B.drop (fromIntegral dataOffset + B.length bstr) page
       when (B.length page /= B.length page') $
         fail $ printf "W/N: %d /= %d! data: %d, page: %d, len: %d" (B.length page) (B.length page') pageOffset dataOffset (B.length bstr)
       lock <- RWL.new
@@ -186,7 +188,7 @@ writeDataAligned handle pageOffset dataOffset bstr = do
     Just (page, cache') -> do
       withLock (pLock page) WriteAccess $ do
         let pageData = pData page
-        let pageData' = B.take dataOffset pageData `B.append` bstr `B.append` B.drop (dataOffset + B.length bstr) pageData
+        let pageData' = B.take (fromIntegral dataOffset) pageData `B.append` bstr `B.append` B.drop (fromIntegral dataOffset + B.length bstr) pageData
         let page' = page {pData = pageData'}
         when (B.length pageData /= B.length pageData') $
           fail $ printf "W/J: %d /= %d!" (B.length pageData) (B.length pageData')

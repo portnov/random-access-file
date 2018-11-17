@@ -37,7 +37,7 @@ instance FileAccess Threaded where
       fdPread fd (fromIntegral size) (fromIntegral offset)
 
   writeData (Threaded fd lockPageSize locks) offset bstr = do
-    let size = B.length bstr
+    let size = fromIntegral $ B.length bstr
         dataOffset0 = offset `mod` lockPageSize
         pageOffset0 = offset - dataOffset0
         dataOffset1 = (offset + size) `mod` lockPageSize
