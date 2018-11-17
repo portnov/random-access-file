@@ -30,6 +30,6 @@ main = defaultMain [
     bench "simple" $ whnfIO $ execute SimpleParams "test.data" True
   , bench "threaded" $ whnfIO $ execute (ThreadedParams 4096) "test.data" True
   , bench "mmaped" $ whnfIO $ execute (MMapedParams 4096) "test.data" True
-  , bench "cached/threaded" $ whnfIO $ execute (CachedBackend $ ThreadedParams 4096) "test.data" False
-  , bench "cached/mmaped" $ whnfIO $ execute (CachedBackend $ MMapedParams 4096) "test.data" False
+  , bench "cached/threaded" $ whnfIO $ execute (dfltCached $ ThreadedParams 4096) "test.data" False
+  , bench "cached/mmaped" $ whnfIO $ execute (dfltCached $ MMapedParams 4096) "test.data" False
   ]

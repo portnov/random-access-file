@@ -51,3 +51,6 @@ instance FileAccess Threaded where
   
   closeFile (Threaded fd _ _) = closeFd fd
 
+dfltThreaded :: AccessParams Threaded
+dfltThreaded = ThreadedParams 4096
+

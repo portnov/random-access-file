@@ -2,7 +2,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module System.IO.RandomAccessFile.Cached where
+module System.IO.RandomAccessFile.Cached
+  (Cached (..),
+   AccessParams (..),
+   dfltCached
+  ) where
 
 import Control.Monad
 import Control.Concurrent
@@ -29,13 +33,13 @@ data CacheData = CacheData {
 
 type Cache = TVar CacheData
 
-data Cached a = Cached a QSem Cache
-
-cachePageSize :: Size
-cachePageSize = 4096
-
-capacity :: Int
-capacity = 40
+data Cached a = Cached {
+    cBackend :: a
+  , cCachePageSize :: Size
+  , cCapacity :: Int
+  , cCloseLock :: QSem
+  , cCache :: Cache
+  }
 
 lookupC :: Offset -> CacheData -> Maybe (Page, CacheData)
 lookupC key c =
@@ -59,16 +63,21 @@ markAllClean c = c {cdClean = update (cdClean c), cdDirty = M.empty}
     update lru = foldr (uncurry LRU.insert) lru (M.assocs $ cdDirty c)
 
 instance FileAccess a => FileAccess (Cached a) where
-  data AccessParams (Cached a) = CachedBackend (AccessParams a)
+  data AccessParams (Cached a) =
+    CachedBackend {
+      backendParams :: AccessParams a
+    , cachePageSize :: Size
+    , cacheCapacity :: Int
+    }
 
-  initFile (CachedBackend params) path = do
+  initFile (CachedBackend params cachePageSize capacity) path = do
       a <- initFile params path
       var <- atomically $ newTVar $ CacheData M.empty (LRU.empty capacity)
       let fileMode = Just 0o644
       let flags = defaultFileFlags
       closeLock <- newQSem 1
       forkIO $ dumpQueue a closeLock var
-      return $ Cached a closeLock var
+      return $ Cached a cachePageSize capacity closeLock var
     where
       dumpQueue a closeLock var = forever $ do
         threadDelay $ 10 * 1000
@@ -86,7 +95,8 @@ instance FileAccess a => FileAccess (Cached a) where
             -- syncFile a
                       
   readData handle offset size = do
-    let dataOffset0 = offset `mod` cachePageSize
+    let cachePageSize = cCachePageSize handle
+        dataOffset0 = offset `mod` cachePageSize
         pageOffset0 = offset - dataOffset0
         dataOffset1 = (offset + size) `mod` cachePageSize
         pageOffset1 = (offset + size) - dataOffset1
@@ -105,6 +115,7 @@ instance FileAccess a => FileAccess (Cached a) where
   
   writeData handle offset bstr = do
     let size = B.length bstr
+        cachePageSize = cCachePageSize handle
         dataOffset0 = offset `mod` cachePageSize
         pageOffset0 = offset - dataOffset0
         dataOffset1 = (offset + size) `mod` cachePageSize
@@ -126,14 +137,17 @@ instance FileAccess a => FileAccess (Cached a) where
     forM_ fragments $ \(pageOffset, dataOffset, fragment) ->
         writeDataAligned handle pageOffset dataOffset fragment
 
-  syncFile (Cached a _ _) = do
-    syncFile a
+  syncFile handle = do
+    syncFile (cBackend handle)
 
-  closeFile (Cached a closeLock var) = do
-    waitQSem closeLock
-    closeFile a
+  closeFile handle = do
+    waitQSem (cCloseLock handle)
+    closeFile (cBackend handle)
 
-readDataAligned (Cached a _ var) pageOffset dataOffset size = do
+readDataAligned handle pageOffset dataOffset size = do
+  let a = cBackend handle
+      var = cCache handle
+      cachePageSize = cCachePageSize handle
   mbCached <- atomically $ do
     cache <- readTVar var
     return $ lookupC pageOffset cache
@@ -151,8 +165,11 @@ readDataAligned (Cached a _ var) pageOffset dataOffset size = do
         let result = B.take size $ B.drop dataOffset $ pData page
         return result
 
-writeDataAligned (Cached a _ var) pageOffset dataOffset bstr = do
+writeDataAligned handle pageOffset dataOffset bstr = do
   -- printf "WA: page %d, data %d, len %d\n" pageOffset dataOffset (B.length bstr)
+  let a = cBackend handle
+      var = cCache handle
+      cachePageSize = cCachePageSize handle
   mbCached <- atomically $ do
     cache <- readTVar var
     return $ lookupC pageOffset cache
@@ -175,4 +192,7 @@ writeDataAligned (Cached a _ var) pageOffset dataOffset bstr = do
           fail $ printf "W/J: %d /= %d!" (B.length pageData) (B.length pageData')
         atomically $ modifyTVar var $ \cache ->
           putDirty pageOffset page' cache
+
+dfltCached :: FileAccess a => AccessParams a -> AccessParams (Cached a)
+dfltCached params = CachedBackend params 4096 100
 
