@@ -68,7 +68,7 @@ instance FileAccess a => FileAccess (Cached a) where
           else do 
             forM_ pages $ \(offset, page) -> do
                 writeData a offset (pData page)
-            syncFile a
+            -- syncFile a
                       
   readData handle offset size = do
     let dataOffset0 = offset `mod` cachePageSize

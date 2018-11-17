@@ -4,3 +4,4 @@ iotests.cabal
 *.hi
 *.o
 *.swp
+*.data
