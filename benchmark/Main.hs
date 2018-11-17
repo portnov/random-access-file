@@ -14,12 +14,12 @@ execute params path doClose = do
 
   replicateM_ 50 $ do
     offset <- randomRIO (100, 900*1024)
-    writeData h offset "abdefgh0123456789"
+    writeBytes h offset "abdefgh0123456789"
     return ()
 
   replicateM_ 50 $ do
     offset <- randomRIO (100, 900*1024)
-    readData h offset 512
+    readBytes h offset 512
     return ()
 
   when doClose $

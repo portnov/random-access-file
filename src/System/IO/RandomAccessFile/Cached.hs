@@ -91,10 +91,10 @@ instance FileAccess a => FileAccess (Cached a) where
           then signalQSem closeLock
           else do 
             forM_ pages $ \(offset, page) -> do
-                writeData a offset (pData page)
+                writeBytes a offset (pData page)
             -- syncFile a
                       
-  readData handle offset size = do
+  readBytes handle offset size = do
     let cachePageSize = cCachePageSize handle
         dataOffset0 = offset `mod` cachePageSize
         pageOffset0 = offset - dataOffset0
@@ -113,7 +113,7 @@ instance FileAccess a => FileAccess (Cached a) where
                    readDataAligned handle pageOffset dataOffset sz
     return $ B.concat fragments
   
-  writeData handle offset bstr = do
+  writeBytes handle offset bstr = do
     let size = fromIntegral $ B.length bstr
         cachePageSize = cCachePageSize handle
         dataOffset0 = offset `mod` cachePageSize
@@ -154,7 +154,7 @@ readDataAligned handle pageOffset dataOffset size = do
     return $ lookupC pageOffset cache
   case mbCached of
     Nothing -> do
-      page <- readData a pageOffset cachePageSize
+      page <- readBytes a pageOffset cachePageSize
       let result = B.take (fromIntegral size) $ B.drop (fromIntegral dataOffset) page
       lock <- RWL.new
       atomically $ modifyTVar var $ \cache ->
@@ -177,7 +177,7 @@ writeDataAligned handle pageOffset dataOffset bstr = do
     return $ lookupC pageOffset cache
   case mbCached of
     Nothing -> do
-      page <- readData a pageOffset cachePageSize
+      page <- readBytes a pageOffset cachePageSize
       let page' = B.take (fromIntegral dataOffset) page `B.append` bstr `B.append` B.drop (fromIntegral dataOffset + B.length bstr) page
       when (B.length page /= B.length page') $
         fail $ printf "W/N: %d /= %d! data: %d, page: %d, len: %d" (B.length page) (B.length page') pageOffset dataOffset (B.length bstr)

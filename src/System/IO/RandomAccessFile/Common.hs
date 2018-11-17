@@ -18,8 +18,8 @@ class FileAccess a where
   data AccessParams a
 
   initFile :: AccessParams a -> FilePath -> IO a
-  readData :: a -> Offset -> Size -> IO B.ByteString
-  writeData :: a -> Offset -> B.ByteString -> IO ()
+  readBytes :: a -> Offset -> Size -> IO B.ByteString
+  writeBytes :: a -> Offset -> B.ByteString -> IO ()
 
   syncFile :: a -> IO ()
   syncFile _ = return ()
@@ -28,7 +28,7 @@ class FileAccess a where
 
 writeZeros :: FileAccess a => a -> Size -> IO ()
 writeZeros h size =
-  writeData h 0 $ B.replicate (fromIntegral size) 0
+  writeBytes h 0 $ B.replicate (fromIntegral size) 0
 
 data AccessType = ReadAccess | WriteAccess
 

@@ -35,7 +35,7 @@ instance FileAccess MMaped where
     ptr <- memoryMap Nothing (fromIntegral size) [MemoryProtectionRead, MemoryProtectionWrite] MemoryMapShared (Just fd) 0
     return $ MMaped fd ptr (fromIntegral size) lockPageSize locks
 
-  readData (MMaped _ ptr _ lockPageSize locks) offset size = do
+  readBytes (MMaped _ ptr _ lockPageSize locks) offset size = do
     let dataOffset0 = offset `mod` lockPageSize
         pageOffset0 = offset - dataOffset0
         dataOffset1 = (offset + size) `mod` lockPageSize
@@ -45,7 +45,7 @@ instance FileAccess MMaped where
       let bstrPtr = plusPtr ptr (fromIntegral offset)
       unsafePackCStringLen (bstrPtr, fromIntegral size)
 
-  writeData (MMaped _ ptr _ lockPageSize locks) offset bstr = do
+  writeBytes (MMaped _ ptr _ lockPageSize locks) offset bstr = do
     let size = fromIntegral $ B.length bstr
         dataOffset0 = offset `mod` lockPageSize
         pageOffset0 = offset - dataOffset0

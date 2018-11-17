@@ -16,12 +16,12 @@ instance FileAccess Simple where
     handle <- openFile path ReadWriteMode
     return $ Simple handle
 
-  readData (Simple handle) offset size = do
+  readBytes (Simple handle) offset size = do
     hSeek handle AbsoluteSeek (fromIntegral offset)
     bstr <- B.hGet handle $ fromIntegral size
     return bstr
 
-  writeData (Simple handle) offset bstr = do
+  writeBytes (Simple handle) offset bstr = do
     hSeek handle AbsoluteSeek (fromIntegral offset)
     B.hPut handle bstr
 

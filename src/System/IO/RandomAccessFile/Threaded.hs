@@ -27,7 +27,7 @@ instance FileAccess Threaded where
     fd <- openFd path ReadWrite fileMode flags
     return $ Threaded fd lockPageSize locks
 
-  readData (Threaded fd lockPageSize locks) offset size = do
+  readBytes (Threaded fd lockPageSize locks) offset size = do
     let dataOffset0 = offset `mod` lockPageSize
         pageOffset0 = offset - dataOffset0
         dataOffset1 = (offset + size) `mod` lockPageSize
@@ -36,7 +36,7 @@ instance FileAccess Threaded where
     underBlockLocks locks ReadAccess pageOffsets $
       fdPread fd (fromIntegral size) (fromIntegral offset)
 
-  writeData (Threaded fd lockPageSize locks) offset bstr = do
+  writeBytes (Threaded fd lockPageSize locks) offset bstr = do
     let size = fromIntegral $ B.length bstr
         dataOffset0 = offset `mod` lockPageSize
         pageOffset0 = offset - dataOffset0
