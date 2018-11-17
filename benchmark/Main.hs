@@ -1,28 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Control.Monad
-import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Exception
-import qualified Control.Concurrent.ReadWriteLock as RWL
-import qualified Data.Map as M
-import qualified Data.ByteString as B
-import System.IO
 import System.Random
-import System.Posix.Types
-import System.Posix.IO
 import Criterion.Main
 
-import Common
-import Simple
-import Threaded
-import MMap
-import Cached
+import System.IO.RandomAccessFile
 
 execute :: FileAccess a => AccessParams a -> FilePath -> Bool -> IO ()
 execute params path doClose = do
 
-  h <- mkFile params path
+  h <- initFile params path
   -- writeZeros h (1024*1024)
 
   replicateM_ 50 $ do
@@ -36,7 +23,7 @@ execute params path doClose = do
     return ()
 
   when doClose $
-    close h
+    closeFile h
 
 main :: IO ()
 main = defaultMain [

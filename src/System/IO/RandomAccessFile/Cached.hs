@@ -2,36 +2,25 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Cached where
+module System.IO.RandomAccessFile.Cached where
 
 import Control.Monad
 import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Exception
 import qualified Control.Concurrent.ReadWriteLock as RWL
 import qualified Data.Map as M
 import qualified Data.ByteString as B
 import qualified Data.LruCache as LRU
-import System.IO
-import System.Random
-import System.Posix.Types
 import System.Posix.IO
 import Text.Printf
 
-import Common
+import System.IO.RandomAccessFile.Common
 
 data Page = Page {pData :: B.ByteString, pLock :: RWL.RWLock}
   deriving (Eq)
 
 instance Show Page where
   show p = "[Page]"
-
--- data WriteQueueItem =
---     CloseFile
---   | QueueItem {
---       qiOffset :: Offset
---     , qiData :: B.ByteString
---     }
 
 data CacheData = CacheData {
     cdDirty :: M.Map Offset Page
@@ -72,8 +61,8 @@ markAllClean c = c {cdClean = update (cdClean c), cdDirty = M.empty}
 instance FileAccess a => FileAccess (Cached a) where
   data AccessParams (Cached a) = CachedBackend (AccessParams a)
 
-  mkFile (CachedBackend params) path = do
-      a <- mkFile params path
+  initFile (CachedBackend params) path = do
+      a <- initFile params path
       var <- atomically $ newTVar $ CacheData M.empty (LRU.empty capacity)
       let fileMode = Just 0o644
       let flags = defaultFileFlags
@@ -140,9 +129,9 @@ instance FileAccess a => FileAccess (Cached a) where
   syncFile (Cached a _ _) = do
     syncFile a
 
-  close (Cached a closeLock var) = do
+  closeFile (Cached a closeLock var) = do
     waitQSem closeLock
-    close a
+    closeFile a
 
 readDataAligned (Cached a _ var) pageOffset dataOffset size = do
   mbCached <- atomically $ do

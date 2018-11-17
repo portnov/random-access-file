@@ -1,16 +1,14 @@
 {-# LANGUAGE TypeFamilies #-}
 
-module Common where
+module System.IO.RandomAccessFile.Common where
 
 import Control.Monad
-import Control.Concurrent
 import Control.Concurrent.STM
 import qualified Control.Concurrent.ReadWriteLock as RWL
 import Control.Exception
 import qualified Data.Map as M
 import qualified Data.ByteString as B
 import Data.List
-import System.IO
 
 type Offset = Int
 type Size = Int
@@ -18,14 +16,14 @@ type Size = Int
 class FileAccess a where
   data AccessParams a
 
-  mkFile :: AccessParams a -> FilePath -> IO a
+  initFile :: AccessParams a -> FilePath -> IO a
   readData :: a -> Offset -> Size -> IO B.ByteString
   writeData :: a -> Offset -> B.ByteString -> IO ()
 
   syncFile :: a -> IO ()
   syncFile _ = return ()
 
-  close :: a -> IO ()
+  closeFile :: a -> IO ()
 
 writeZeros :: FileAccess a => a -> Size -> IO ()
 writeZeros h size =

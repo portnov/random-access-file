@@ -1,5 +1,5 @@
 .stack-work/
-iotests.cabal
+*.cabal
 *~
 *.hi
 *.o

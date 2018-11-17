@@ -2,30 +2,25 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Threaded where
+module System.IO.RandomAccessFile.Threaded where
 
-import Control.Monad
-import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception
-import qualified Control.Concurrent.ReadWriteLock as RWL
 import qualified Data.Map as M
 import qualified Data.ByteString as B
-import System.IO
-import System.Random
 import System.Posix.Types
 import System.Posix.IO
 import "unix-bytestring" System.Posix.IO.ByteString
 import Text.Printf
 
-import Common
+import System.IO.RandomAccessFile.Common
 
 data Threaded = Threaded Fd Size (TVar FileLocks)
 
 instance FileAccess Threaded where
   data AccessParams Threaded = ThreadedParams Size
 
-  mkFile (ThreadedParams lockPageSize) path = do
+  initFile (ThreadedParams lockPageSize) path = do
     locks <- atomically $ newTVar M.empty
     let fileMode = Just 0o644
     let flags = defaultFileFlags
@@ -54,5 +49,5 @@ instance FileAccess Threaded where
                      printf "pwrite: offset %d, len %d: %s\n"
                             offset (B.length bstr) (show e))
   
-  close (Threaded fd _ _) = closeFd fd
+  closeFile (Threaded fd _ _) = closeFd fd
 

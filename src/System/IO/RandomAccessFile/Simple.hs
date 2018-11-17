@@ -1,15 +1,10 @@
 {-# LANGUAGE TypeFamilies #-}
-module Simple where
+module System.IO.RandomAccessFile.Simple where
 
-import Control.Monad
-import Control.Concurrent
-import Control.Concurrent.STM
-import Control.Exception
-import qualified Data.Map as M
 import qualified Data.ByteString as B
 import System.IO
 
-import Common
+import System.IO.RandomAccessFile.Common
 
 data Simple = Simple Handle
   deriving (Eq, Show)
@@ -17,7 +12,7 @@ data Simple = Simple Handle
 instance FileAccess Simple where
   data AccessParams Simple = SimpleParams
 
-  mkFile _ path = do
+  initFile _ path = do
     handle <- openFile path ReadWriteMode
     return $ Simple handle
 
@@ -30,5 +25,5 @@ instance FileAccess Simple where
     hSeek handle AbsoluteSeek (fromIntegral offset)
     B.hPut handle bstr
 
-  close (Simple handle) = hClose handle
+  closeFile (Simple handle) = hClose handle
 

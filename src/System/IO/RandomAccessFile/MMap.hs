@@ -2,35 +2,28 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module MMap where
+module System.IO.RandomAccessFile.MMap where
 
-import Control.Monad
-import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Exception
-import qualified Control.Concurrent.ReadWriteLock as RWL
 import qualified Data.Map as M
 import qualified Data.ByteString as B
 import Data.ByteString.Unsafe
 import System.IO
-import System.Random
 import System.Posix.Types
 import System.Posix.IO
-import Text.Printf
 import Foreign.Ptr
 import Foreign.C.Types
-import Foreign.C.String
 import Foreign.Marshal
 import System.Posix.Memory
 
-import Common
+import System.IO.RandomAccessFile.Common
 
 data MMaped = MMaped Fd (Ptr CChar) CSize Size (TVar FileLocks)
 
 instance FileAccess MMaped where
   data AccessParams MMaped = MMapedParams Size
 
-  mkFile (MMapedParams lockPageSize) path = do
+  initFile (MMapedParams lockPageSize) path = do
     locks <- atomically $ newTVar M.empty
     let fileMode = Just 0o644
     let flags = defaultFileFlags
@@ -66,6 +59,6 @@ instance FileAccess MMaped where
   syncFile (MMaped _ ptr size _ _) =
     memorySync ptr size [MemorySyncSync, MemorySyncInvalidate]
   
-  close (MMaped fd ptr size _ _) = do
+  closeFile (MMaped fd ptr size _ _) = do
     memoryUnmap ptr size
 
