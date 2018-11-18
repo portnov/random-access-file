@@ -25,5 +25,8 @@ instance FileAccess Simple where
     hSeek handle AbsoluteSeek (fromIntegral offset)
     B.hPut handle bstr
 
+  currentFileSize (Simple handle) =
+    fromIntegral `fmap` hFileSize handle
+
   closeFile (Simple handle) = hClose handle
 

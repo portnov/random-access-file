@@ -56,6 +56,8 @@ instance FileAccess MMaped where
       unsafeUseAsCStringLen bstr $ \(bstrPtr,len) ->
         copyBytes (plusPtr ptr (fromIntegral offset)) bstrPtr len
 
+  currentFileSize _ = undefined
+
   syncFile (MMaped _ ptr size _ _) =
     memorySync ptr size [MemorySyncSync, MemorySyncInvalidate]
   

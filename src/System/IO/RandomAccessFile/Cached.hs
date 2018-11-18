@@ -16,6 +16,7 @@ import qualified Data.Map as M
 import qualified Data.ByteString as B
 import qualified Data.LruCache as LRU
 import System.Posix.IO
+import System.Directory
 import Text.Printf
 
 import System.IO.RandomAccessFile.Common
@@ -62,6 +63,9 @@ markAllClean c = c {cdClean = update (cdClean c), cdDirty = M.empty}
   where
     update lru = foldr (uncurry LRU.insert) lru (M.assocs $ cdDirty c)
 
+mkPage :: Size -> B.ByteString
+mkPage sz = B.replicate (fromIntegral sz) 0
+
 instance FileAccess a => FileAccess (Cached a) where
   data AccessParams (Cached a) =
     CachedBackend {
@@ -71,7 +75,11 @@ instance FileAccess a => FileAccess (Cached a) where
     }
 
   initFile (CachedBackend params cachePageSize capacity) path = do
+      ex <- doesFileExist path
       a <- initFile params path
+      when (not ex) $ do
+        writeBytes a 0 $ mkPage cachePageSize
+        
       var <- atomically $ newTVar $ CacheData M.empty (LRU.empty capacity)
       let fileMode = Just 0o644
       let flags = defaultFileFlags
@@ -93,6 +101,9 @@ instance FileAccess a => FileAccess (Cached a) where
             forM_ pages $ \(offset, page) -> do
                 writeBytes a offset (pData page)
             -- syncFile a
+  
+  currentFileSize handle =
+    currentFileSize (cBackend handle)
                       
   readBytes handle offset size = do
     let cachePageSize = cCachePageSize handle
@@ -169,15 +180,19 @@ readDataAligned handle pageOffset dataOffset size = do
 writeDataAligned :: FileAccess a => Cached a -> Offset -> Offset -> B.ByteString -> IO ()
 writeDataAligned handle pageOffset dataOffset bstr = do
   -- printf "WA: page %d, data %d, len %d\n" pageOffset dataOffset (B.length bstr)
+  fsize <- currentFileSize handle
   let a = cBackend handle
       var = cCache handle
       cachePageSize = cCachePageSize handle
+      size = fromIntegral $ B.length bstr
   mbCached <- atomically $ do
     cache <- readTVar var
     return $ lookupC pageOffset cache
   case mbCached of
     Nothing -> do
-      page <- readBytes a pageOffset cachePageSize
+      page <- if (pageOffset + dataOffset + size) >= fsize
+                then return $ mkPage cachePageSize
+                else readBytes a pageOffset cachePageSize
       let page' = B.take (fromIntegral dataOffset) page `B.append` bstr `B.append` B.drop (fromIntegral dataOffset + B.length bstr) page
       when (B.length page /= B.length page') $
         fail $ printf "W/N: %d /= %d! data: %d, page: %d, len: %d" (B.length page) (B.length page') pageOffset dataOffset (B.length bstr)

@@ -29,6 +29,7 @@ dependencies:
 - unix-memory
 - concurrent-extra
 - lrucaching
+- directory
 
 library:
   source-dirs:         src

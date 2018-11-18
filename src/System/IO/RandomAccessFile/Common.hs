@@ -21,6 +21,8 @@ class FileAccess a where
   readBytes :: a -> Offset -> Size -> IO B.ByteString
   writeBytes :: a -> Offset -> B.ByteString -> IO ()
 
+  currentFileSize :: a -> IO Size
+
   syncFile :: a -> IO ()
   syncFile _ = return ()
 
