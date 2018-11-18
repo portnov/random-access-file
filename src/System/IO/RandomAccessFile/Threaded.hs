@@ -9,6 +9,7 @@ import Control.Concurrent.STM
 import Control.Exception
 import qualified Data.Map as M
 import qualified Data.ByteString as B
+import Data.Int
 import System.Posix.Types
 import System.Posix.IO
 import System.IO
@@ -33,6 +34,7 @@ instance FileAccess Threaded where
     let flags = defaultFileFlags
     handle <- openFile path ReadWriteMode
     size <- hFileSize handle
+    -- printf "Size: %d\n" size
     sizeVar <- newTVarIO (fromIntegral size)
     fd <- handleToFd handle
     -- fd <- openFd path ReadWrite fileMode flags
@@ -46,7 +48,7 @@ instance FileAccess Threaded where
         pageOffsets = [pageOffset0, pageOffset0 + lockPageSize .. pageOffset1]
     fsize <- atomically $ readTVar fileSizeVar
     if offset > fsize || (offset + size) > fsize
-      then fail $ printf "readBytes: read after EOF: size %d, offset %d, size %d" fsize offset size
+      then fail $ printf "readBytes: read after EOF: file size %d, offset %d, data size %d" fsize offset size
       else do
         underBlockLocks locks ReadAccess pageOffsets $
           fdPread fd (fromIntegral size) (fromIntegral offset)
@@ -70,11 +72,14 @@ instance FileAccess Threaded where
                                 offset (B.length bstr) (show e))
       fsize <- atomically $ readTVar fileSizeVar
       underBlockLocks locks WriteAccess pageOffsets $ do
-          let delta = max 0 $ (offset + size) - fsize
+          let delta :: Int64
+              delta = max 0 $ fromIntegral (offset + size) - fromIntegral fsize
           when (delta > 0) $
               pwrite (B.replicate (fromIntegral delta) 0) fsize
           pwrite bstr offset
-          atomically $ writeTVar fileSizeVar (fsize + delta)
+          when (delta > 0) $ do
+              -- printf "New size: %d+%d\n" fsize delta
+              atomically $ writeTVar fileSizeVar $ fromIntegral (fromIntegral fsize + delta)
 
   currentFileSize h = do
     let var = tFileSize h

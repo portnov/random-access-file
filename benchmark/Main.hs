@@ -1,10 +1,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 import Control.Monad
+import qualified Data.ByteString as B
 import System.Random
+import System.IO
 import Criterion.Main
 
 import System.IO.RandomAccessFile
+
+createFile :: FilePath -> IO ()
+createFile path = do
+  h <- openFile path ReadWriteMode
+  B.hPut h $ B.replicate (1024*1024) 0
+  hClose h
 
 execute :: FileAccess a => AccessParams a -> FilePath -> Bool -> IO ()
 execute params path doClose = do
@@ -27,9 +35,12 @@ execute params path doClose = do
 
 main :: IO ()
 main = defaultMain [
-    bench "simple" $ whnfIO $ execute SimpleParams "test.data" True
-  , bench "threaded" $ whnfIO $ execute (ThreadedParams 4096) "test.data" True
-  , bench "mmaped" $ whnfIO $ execute (MMapedParams 4096) "test.data" True
-  , bench "cached/threaded" $ whnfIO $ execute (dfltCached $ ThreadedParams 4096) "test.data" False
-  , bench "cached/mmaped" $ whnfIO $ execute (dfltCached $ MMapedParams 4096) "test.data" False
+  env (createFile "test.data") $ \_ -> bgroup "main" [
+      bench "simple" $ whnfIO $ execute SimpleParams "test.data" True
+    , bench "threaded" $ whnfIO $ execute (ThreadedParams 4096) "test.data" True
+    , bench "mmaped" $ whnfIO $ execute (MMapedParams 4096) "test.data" True
+    , bench "cached/threaded" $ whnfIO $ execute (dfltCached $ ThreadedParams 4096) "test.data" False
+    , bench "cached/mmaped" $ whnfIO $ execute (dfltCached $ MMapedParams 4096) "test.data" False
+    ]
   ]
+
