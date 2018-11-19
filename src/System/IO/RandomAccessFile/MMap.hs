@@ -30,6 +30,7 @@ data MMaped = MMaped {
     mmFile :: TVar Fd
   , mmPath :: FilePath
   , mmData :: TVar (Ptr CChar)
+  , mmExtendable :: Bool
   , mmFileSize :: TVar CSize
   , mmLockPageSize :: Size
   , mmLocks :: TVar FileLocks
@@ -45,7 +46,7 @@ mmap size fd =
 -- to specified.
 -- While file is resized, all reading and writing to it are locked.
 extendFile :: MMaped -> Size -> IO ()
-extendFile handle newSize = do
+extendFile handle newSize = when (mmExtendable handle) $ do
   let sizeVar = mmFileSize handle
       ptrVar = mmData handle
   ptr <- atomically $ readTVar ptrVar
@@ -84,11 +85,10 @@ extendFile handle newSize = do
           writeTVar ptrVar ptr'
           writeTVar sizeVar (fromIntegral newSize)
 
-
 instance FileAccess MMaped where
-  data AccessParams MMaped = MMapedParams Size
+  data AccessParams MMaped = MMapedParams Size Bool
 
-  initFile (MMapedParams lockPageSize) path = do
+  initFile (MMapedParams lockPageSize extendable) path = do
     locks <- atomically $ newTVar M.empty
     let fileMode = Just 0o644
     let flags = defaultFileFlags
@@ -110,7 +110,7 @@ instance FileAccess MMaped where
     ptr <- mmap (fromIntegral size) fd
     ptrVar <- newTVarIO ptr
     resizeLock <- RWL.new
-    return $ MMaped fdVar path ptrVar sizeVar lockPageSize locks resizeLock
+    return $ MMaped fdVar path ptrVar extendable sizeVar lockPageSize locks resizeLock
 
   readBytes handle offset size = do
     let ptrVar = mmData handle
@@ -123,7 +123,7 @@ instance FileAccess MMaped where
         pageOffset1 = (offset + size) - dataOffset1
         pageOffsets = [pageOffset0, pageOffset0 + lockPageSize .. pageOffset1]
 
-    withLock (mmResizeLock handle) ReadAccess $ -- just check that file is not currently being resized
+    withLock_ (mmExtendable handle) (mmResizeLock handle) ReadAccess $ -- just check that file is not currently being resized
       underBlockLocks locks ReadAccess pageOffsets $ do
         let bstrPtr = plusPtr ptr (fromIntegral offset)
         unsafePackCStringLen (bstrPtr, fromIntegral size)
@@ -147,7 +147,7 @@ instance FileAccess MMaped where
            writeBytes handle offset bstr
       else
         -- just check that file is not currently being resized
-        withLock (mmResizeLock handle) ReadAccess $
+        withLock_ (mmExtendable handle) (mmResizeLock handle) ReadAccess $
           underBlockLocks locks WriteAccess pageOffsets $ do
             ptr <- atomically $ readTVar ptrVar
             unsafeUseAsCStringLen bstr $ \(bstrPtr,len) ->

@@ -1,32 +1,38 @@
 {-# LANGUAGE TypeFamilies #-}
 module System.IO.RandomAccessFile.Simple where
 
+import Control.Concurrent
+import Control.Exception
 import qualified Data.ByteString as B
 import System.IO
 
 import System.IO.RandomAccessFile.Common
 
-data Simple = Simple Handle
-  deriving (Eq, Show)
+data Simple = Simple Handle QSem
 
 instance FileAccess Simple where
   data AccessParams Simple = SimpleParams
 
   initFile _ path = do
     handle <- openFile path ReadWriteMode
-    return $ Simple handle
+    sem <- newQSem 1
+    return $ Simple handle sem
 
-  readBytes (Simple handle) offset size = do
-    hSeek handle AbsoluteSeek (fromIntegral offset)
-    bstr <- B.hGet handle $ fromIntegral size
-    return bstr
+  readBytes (Simple handle sem) offset size = do
+    bracket_ (waitQSem sem) (signalQSem sem) $ do
+        hSeek handle AbsoluteSeek (fromIntegral offset)
+        bstr <- B.hGet handle $ fromIntegral size
+        return bstr
 
-  writeBytes (Simple handle) offset bstr = do
-    hSeek handle AbsoluteSeek (fromIntegral offset)
-    B.hPut handle bstr
+  writeBytes (Simple handle sem) offset bstr = do
+    bracket_ (waitQSem sem) (signalQSem sem) $ do
+        hSeek handle AbsoluteSeek (fromIntegral offset)
+        B.hPut handle bstr
 
-  currentFileSize (Simple handle) =
+  currentFileSize (Simple handle sem) =
     fromIntegral `fmap` hFileSize handle
 
-  closeFile (Simple handle) = hClose handle
+  closeFile (Simple handle sem) =
+    bracket_ (waitQSem sem) (signalQSem sem) $ do
+        hClose handle
 

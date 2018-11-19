@@ -60,6 +60,10 @@ withLocks locks WriteAccess action =
     (forM_ locks RWL.releaseWrite)
     action
 
+withLock_ :: Bool -> RWL.RWLock -> AccessType -> IO a -> IO a
+withLock_ False _ _ action = action
+withLock_ True lock access action = withLock lock access action
+
 underBlockLock :: TVar FileLocks -> AccessType -> Offset -> IO a -> IO a
 underBlockLock locksVar access n action = do
   newLock <- RWL.new
