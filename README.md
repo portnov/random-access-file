@@ -9,10 +9,12 @@ large files, for example for DB engines.
 The following implementations are provided:
 
 * Simple: trivial wrapper around standard System.IO calls. Created mostly for
-  demonstrative purposes. Note: this implementation is not thread-safe at all,
-  because it uses one Handle for one file, and that Handle stores current
-  position in the file; if different threads would move the pointer forward and
-  backward at the same time, you will get garbage.
+  demonstrative purposes. Specific thing about System.IO calls is that they
+  work with one Handle per file, and that Handle contains a pointer to current
+  position in the file. So it is not possible for several threads to read or
+  write to different positions in the file. This implementation is made
+  thread-safe by adding a global per-file lock: several threads can read and/or
+  write to different positions of the file, but all access will be serialized.
 * Threaded: file access using Posix pread(3), pwrite(3) calls. This
   implementation is thread-safe. It is using block-level locks; each block can
   be accessed for write by single thread, or for read by many threads. Size of
@@ -21,47 +23,48 @@ The following implementations are provided:
   It is using block-level locks also.
 * Cached: File access using application-level page cache, which can be used
   over Threaded or MMaped file access. Size of cache pages and capacity of the
-  cache are adjustable.
+  cache are adjustable. Performance of this implementation depends very
+  seriously on your usage pattern and page size.
 
 ## Benchmark results
 
 ```
 Benchmark random-access-file-benchmark: RUNNING...
-benchmarking simple                     
-time                 626.6 μs   (606.9 μs .. 647.1 μs)
-                     0.989 R²   (0.983 R² .. 0.995 R²)
-mean                 657.5 μs   (633.9 μs .. 721.2 μs)
-std dev              123.9 μs   (49.51 μs .. 231.3 μs)
-variance introduced by outliers: 92% (severely inflated)
-                                        
-benchmarking threaded                   
-time                 413.0 μs   (410.8 μs .. 415.2 μs)
-                     0.999 R²   (0.997 R² .. 1.000 R²)
-mean                 421.8 μs   (412.8 μs .. 457.2 μs)
-std dev              58.30 μs   (3.003 μs .. 124.0 μs)
-variance introduced by outliers: 87% (severely inflated)
-                                        
-benchmarking mmaped                     
-time                 282.8 μs   (275.1 μs .. 292.4 μs)
-                     0.987 R²   (0.978 R² .. 0.994 R²)
-mean                 301.6 μs   (288.8 μs .. 330.9 μs)
-std dev              63.22 μs   (30.75 μs .. 114.4 μs)
-variance introduced by outliers: 94% (severely inflated)
-                                        
-benchmarking cached/threaded            
-time                 2.763 ms   (2.551 ms .. 2.901 ms)
-                     0.971 R²   (0.953 R² .. 0.984 R²)
-mean                 2.238 ms   (2.121 ms .. 2.382 ms)
-std dev              398.3 μs   (346.2 μs .. 462.2 μs)
-variance introduced by outliers: 88% (severely inflated)
-                                        
-benchmarking cached/mmaped              
-time                 1.681 ms   (1.358 ms .. 2.103 ms)
-                     0.827 R²   (0.753 R² .. 0.993 R²)
-mean                 1.443 ms   (1.382 ms .. 1.664 ms)
-std dev              311.7 μs   (119.4 μs .. 657.3 μs)
-variance introduced by outliers: 93% (severely inflated)
-                                        
+benchmarking main/simple
+time                 691.1 ms   (-610.8 ms .. 1.689 s)
+                     0.639 R²   (0.044 R² .. 1.000 R²)
+mean                 1.781 s    (1.088 s .. 2.106 s)
+std dev              543.2 ms   (192.5 ms .. 732.0 ms)
+variance introduced by outliers: 73% (severely inflated)
+
+benchmarking main/threaded
+time                 228.5 ms   (196.1 ms .. 248.2 ms)
+                     0.993 R²   (0.978 R² .. 1.000 R²)
+mean                 250.5 ms   (239.5 ms .. 257.1 ms)
+std dev              11.31 ms   (3.916 ms .. 16.04 ms)
+variance introduced by outliers: 16% (moderately inflated)
+
+benchmarking main/mmaped
+time                 166.0 ms   (147.6 ms .. 182.9 ms)
+                     0.989 R²   (0.963 R² .. 1.000 R²)
+mean                 162.5 ms   (157.6 ms .. 168.0 ms)
+std dev              7.960 ms   (4.764 ms .. 11.38 ms)
+variance introduced by outliers: 12% (moderately inflated)
+
+benchmarking main/cached/threaded
+time                 1.272 s    (575.8 ms .. 1.865 s)
+                     0.951 R²   (0.925 R² .. 1.000 R²)
+mean                 1.517 s    (1.365 s .. 1.626 s)
+std dev              150.9 ms   (64.02 ms .. 207.5 ms)
+variance introduced by outliers: 23% (moderately inflated)
+
+benchmarking main/cached/mmaped
+time                 199.2 ms   (78.98 ms .. 332.2 ms)
+                     0.863 R²   (0.708 R² .. 1.000 R²)
+mean                 237.7 ms   (190.4 ms .. 285.1 ms)
+std dev              62.14 ms   (31.83 ms .. 85.03 ms)
+variance introduced by outliers: 58% (severely inflated)
+
 Benchmark random-access-file-benchmark: FINISH
 ```
 
