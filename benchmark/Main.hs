@@ -30,12 +30,12 @@ execute params path doClose = do
   -- writeZeros h (1024*1024)
 
   concurrently 20 $ do
-      replicateM_ 100 $ do
+      replicateM_ 500 $ do
         offset <- randomRIO (100, 100*900*1024)
         writeBytes h offset "abdefgh0123456789ABCDEFGIJK"
         return ()
 
-      replicateM_ 100 $ do
+      replicateM_ 1000 $ do
         offset <- randomRIO (100, 100*900*1024)
         readBytes h offset 512
         return ()
@@ -43,7 +43,7 @@ execute params path doClose = do
   when doClose $
     closeFile h
 
-pageSize = 1024
+pageSize = 16*1024
 
 main :: IO ()
 main = defaultMain [
@@ -51,8 +51,8 @@ main = defaultMain [
       bench "simple" $ whnfIO $ execute SimpleParams "test.data" True
     , bench "threaded" $ whnfIO $ execute (ThreadedParams pageSize) "test.data" True
     , bench "mmaped" $ whnfIO $ execute (MMapedParams pageSize False) "test.data" True
-    , bench "cached/threaded" $ whnfIO $ execute ((dfltCached (ThreadedParams pageSize)) {cachePageSize = pageSize}) "test.data" False
-    , bench "cached/mmaped" $ whnfIO $ execute ((dfltCached (MMapedParams pageSize False)) {cachePageSize = pageSize}) "test.data" False
+    , bench "cached/threaded" $ whnfIO $ execute ((dfltCached (ThreadedParams pageSize)) {cachePageSize = pageSize}) "test.data" True
+    , bench "cached/mmaped" $ whnfIO $ execute ((dfltCached (MMapedParams pageSize False)) {cachePageSize = pageSize}) "test.data" True
     ]
   ]
 

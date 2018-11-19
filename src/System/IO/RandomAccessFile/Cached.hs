@@ -39,7 +39,7 @@ data Cached a = Cached {
     cBackend :: a
   , cCachePageSize :: Size
   , cCapacity :: Int
-  , cCloseLock :: QSem
+  , cCloseLock :: TVar Bool
   , cCache :: Cache
   }
 
@@ -84,12 +84,12 @@ instance FileAccess a => FileAccess (Cached a) where
       var <- atomically $ newTVar $ CacheData M.empty (LRU.empty capacity)
       let fileMode = Just 0o644
       let flags = defaultFileFlags
-      closeLock <- newQSem 1
+      closeLock <- newTVarIO False
       forkIO $ dumpQueue a closeLock var
       return $ Cached a cachePageSize capacity closeLock var
     where
-      dumpQueue a closeLock var = forever $ do
-        threadDelay $ 10 * 1000
+      dumpQueue a closeLock var = do
+--         threadDelay 10
         pages <- atomically $ do
                   cache <- readTVar var
                   let pages = M.assocs $ cdDirty cache
@@ -97,11 +97,16 @@ instance FileAccess a => FileAccess (Cached a) where
                   writeTVar var cache'
                   return pages
         if null pages
-          then signalQSem closeLock
-          else do 
+          then do
+            canClose <- atomically $ readTVar closeLock
+            if canClose
+              then closeFile a
+              else dumpQueue a closeLock var
+          else do
             forM_ pages $ \(offset, page) -> do
                 writeBytes a offset (L.toStrict $ pData page)
             -- syncFile a
+            dumpQueue a closeLock var
   
   currentFileSize handle =
     currentFileSize (cBackend handle)
@@ -153,8 +158,7 @@ instance FileAccess a => FileAccess (Cached a) where
     syncFile (cBackend handle)
 
   closeFile handle = do
-    waitQSem (cCloseLock handle)
-    closeFile (cBackend handle)
+    atomically $ writeTVar (cCloseLock handle) True
 
 readDataAligned :: FileAccess a => Cached a -> Offset -> Offset -> Size -> IO B.ByteString
 readDataAligned handle pageOffset dataOffset size = do

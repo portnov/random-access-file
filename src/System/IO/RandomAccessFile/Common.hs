@@ -3,6 +3,7 @@
 module System.IO.RandomAccessFile.Common where
 
 import Control.Monad
+import Control.Concurrent
 import Control.Concurrent.STM
 import qualified Control.Concurrent.ReadWriteLock as RWL
 import Control.Exception
@@ -35,6 +36,10 @@ writeZeros h size =
 data AccessType = ReadAccess | WriteAccess
 
 type FileLocks = M.Map Offset RWL.RWLock
+
+withQSem :: QSem -> IO a -> IO a
+withQSem sem =
+  bracket_ (waitQSem sem) (signalQSem sem)
 
 withLock :: RWL.RWLock -> AccessType -> IO a -> IO a
 withLock lock ReadAccess action =
