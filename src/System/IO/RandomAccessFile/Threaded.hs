@@ -46,16 +46,12 @@ instance FileAccess Threaded where
         dataOffset1 = (offset + size) `mod` lockPageSize
         pageOffset1 = (offset + size) - dataOffset1
         pageOffsets = [pageOffset0, pageOffset0 + lockPageSize .. pageOffset1]
-    fsize <- atomically $ readTVar fileSizeVar
-    if offset > fsize || (offset + size) > fsize
-      then fail $ printf "readBytes: read after EOF: file size %d, offset %d, data size %d" fsize offset size
-      else do
-        underBlockLocks locks ReadAccess pageOffsets $
-          fdPread fd (fromIntegral size) (fromIntegral offset)
-              `catch` (\(e :: SomeException) -> do
-                         printf "pread: offset %d, len %d: %s\n"
-                                offset size (show e)
-                         throw e)
+    underBlockLocks locks ReadAccess pageOffsets $
+      fdPread fd (fromIntegral size) (fromIntegral offset)
+          `catch` (\(e :: SomeException) -> do
+                     printf "pread: offset %d, len %d: %s\n"
+                            offset size (show e)
+                     throw e)
 
   writeBytes (Threaded fd fileSizeVar lockPageSize locks) offset bstr = do
       let size = fromIntegral $ B.length bstr

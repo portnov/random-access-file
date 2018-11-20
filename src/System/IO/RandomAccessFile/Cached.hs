@@ -74,9 +74,10 @@ instance FileAccess a => FileAccess (Cached a) where
       backendParams :: AccessParams a
     , cachePageSize :: Size
     , cacheCapacity :: Int
+    , cacheFlushPeriod :: Int
     }
 
-  initFile (CachedBackend params cachePageSize capacity) path = do
+  initFile (CachedBackend params cachePageSize capacity flushPeriod) path = do
       ex <- doesFileExist path
       a <- initFile params path
       when (not ex) $ do
@@ -91,7 +92,7 @@ instance FileAccess a => FileAccess (Cached a) where
       return $ Cached a cachePageSize capacity canClose closeLock var
     where
       dumpQueue a canCloseVar closeLock var = do
-        threadDelay $ 100
+        threadDelay flushPeriod
         pages <- atomically $ do
                   cache <- readTVar var
                   let pages = M.assocs $ cdDirty cache
@@ -227,5 +228,5 @@ writeDataAligned handle pageOffset dataOffset bstr = do
           putDirty pageOffset page' cache
 
 dfltCached :: FileAccess a => AccessParams a -> AccessParams (Cached a)
-dfltCached params = CachedBackend params 4096 100
+dfltCached params = CachedBackend params 4096 1024 (10*1000)
 

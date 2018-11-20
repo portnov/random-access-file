@@ -42,6 +42,8 @@ benchmarks:
       - criterion
       - random
       - random-access-file
+      - mwc-random
+      - vector
     source-dirs: benchmark
     main: Main.hs
     ghc-options:
