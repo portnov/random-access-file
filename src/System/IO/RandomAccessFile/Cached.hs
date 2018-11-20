@@ -22,7 +22,7 @@ import Text.Printf
 
 import System.IO.RandomAccessFile.Common
 
-data Page = Page {pData :: L.ByteString, pLock :: RWL.RWLock}
+data Page = Page {pData :: B.ByteString, pLock :: RWL.RWLock}
   deriving (Eq)
 
 instance Show Page where
@@ -39,7 +39,8 @@ data Cached a = Cached {
     cBackend :: a
   , cCachePageSize :: Size
   , cCapacity :: Int
-  , cCloseLock :: TVar Bool
+  , cCanClose :: TVar Bool
+  , cCloseLock :: MVar ()
   , cCache :: Cache
   }
 
@@ -84,12 +85,13 @@ instance FileAccess a => FileAccess (Cached a) where
       var <- atomically $ newTVar $ CacheData M.empty (LRU.empty capacity)
       let fileMode = Just 0o644
       let flags = defaultFileFlags
-      closeLock <- newTVarIO False
-      forkIO $ dumpQueue a closeLock var
-      return $ Cached a cachePageSize capacity closeLock var
+      canClose <- newTVarIO False
+      closeLock <- newEmptyMVar
+      forkIO $ dumpQueue a canClose closeLock var
+      return $ Cached a cachePageSize capacity canClose closeLock var
     where
-      dumpQueue a closeLock var = do
---         threadDelay 10
+      dumpQueue a canCloseVar closeLock var = do
+        threadDelay $ 100
         pages <- atomically $ do
                   cache <- readTVar var
                   let pages = M.assocs $ cdDirty cache
@@ -98,15 +100,18 @@ instance FileAccess a => FileAccess (Cached a) where
                   return pages
         if null pages
           then do
-            canClose <- atomically $ readTVar closeLock
+            -- check if there was a closeFile call
+            canClose <- atomically $ readTVar canCloseVar
             if canClose
-              then closeFile a
-              else dumpQueue a closeLock var
+              then do
+                closeFile a
+                putMVar closeLock () -- signal to closeFile call
+              else dumpQueue a canCloseVar closeLock var
           else do
             forM_ pages $ \(offset, page) -> do
-                writeBytes a offset (L.toStrict $ pData page)
+                writeBytes a offset (pData page)
             -- syncFile a
-            dumpQueue a closeLock var
+            dumpQueue a canCloseVar closeLock var
   
   currentFileSize handle =
     currentFileSize (cBackend handle)
@@ -158,7 +163,11 @@ instance FileAccess a => FileAccess (Cached a) where
     syncFile (cBackend handle)
 
   closeFile handle = do
-    atomically $ writeTVar (cCloseLock handle) True
+    -- signal to dumpQueue thread that we are ready
+    -- for file to be closed
+    atomically $ writeTVar (cCanClose handle) True
+    -- wait for signal from dumpQueue thread
+    takeMVar (cCloseLock handle)
 
 readDataAligned :: FileAccess a => Cached a -> Offset -> Offset -> Size -> IO B.ByteString
 readDataAligned handle pageOffset dataOffset size = do
@@ -174,12 +183,12 @@ readDataAligned handle pageOffset dataOffset size = do
       let result = B.take (fromIntegral size) $ B.drop (fromIntegral dataOffset) page
       lock <- RWL.new
       atomically $ modifyTVar var $ \cache ->
-        putClean pageOffset (Page (L.fromStrict page) lock) cache
+        putClean pageOffset (Page page lock) cache
       return result
     Just (page, cache') -> do
       withLock (pLock page) ReadAccess $ do
         atomically $ writeTVar var cache'
-        let result = L.toStrict $ L.take (fromIntegral size) $ L.drop (fromIntegral dataOffset) $ pData page
+        let result = B.take (fromIntegral size) $ B.drop (fromIntegral dataOffset) $ pData page
         return result
 
 writeDataAligned :: FileAccess a => Cached a -> Offset -> Offset -> B.ByteString -> IO ()
@@ -198,13 +207,11 @@ writeDataAligned handle pageOffset dataOffset bstr = do
       page <- if (pageOffset + dataOffset + size) >= fsize
                 then return $ mkPage cachePageSize
                 else readBytes a pageOffset cachePageSize
-      let lazyPage = L.fromStrict page
-          lazyBstr = L.fromStrict bstr
-      let page' = L.take (fromIntegral dataOffset) lazyPage `L.append`
-                   lazyBstr `L.append`
-                   L.drop (fromIntegral dataOffset + L.length lazyBstr) lazyPage
-      when (fromIntegral (B.length page) /= L.length page') $
-        fail $ printf "W/N: %d /= %d! data: %d, page: %d, len: %d" (B.length page) (L.length page') pageOffset dataOffset (B.length bstr)
+      let page' = B.take (fromIntegral dataOffset) page `B.append`
+                   bstr `B.append`
+                   B.drop (fromIntegral dataOffset + B.length bstr) page
+      when (fromIntegral (B.length page) /= B.length page') $
+        fail $ printf "W/N: %d /= %d! data: %d, page: %d, len: %d" (B.length page) (B.length page') pageOffset dataOffset (B.length bstr)
       lock <- RWL.new
       atomically $ modifyTVar var $ \cache ->
         putDirty pageOffset (Page page' lock) cache
@@ -212,11 +219,10 @@ writeDataAligned handle pageOffset dataOffset bstr = do
     Just (page, cache') -> do
       withLock (pLock page) WriteAccess $ do
         let pageData = pData page
-            lazyBstr = L.fromStrict bstr
-        let pageData' = L.take (fromIntegral dataOffset) pageData `L.append` lazyBstr `L.append` L.drop (fromIntegral dataOffset + L.length lazyBstr) pageData
+        let pageData' = B.take (fromIntegral dataOffset) pageData `B.append` bstr `B.append` B.drop (fromIntegral dataOffset + B.length bstr) pageData
         let page' = page {pData = pageData'}
-        when (L.length pageData /= L.length pageData') $
-          fail $ printf "W/J: %d /= %d!" (L.length pageData) (L.length pageData')
+        when (B.length pageData /= B.length pageData') $
+          fail $ printf "W/J: %d /= %d!" (B.length pageData) (B.length pageData')
         atomically $ modifyTVar var $ \cache ->
           putDirty pageOffset page' cache
 
