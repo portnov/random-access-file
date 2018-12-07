@@ -49,6 +49,7 @@ extendFile :: MMaped -> Size -> IO ()
 extendFile handle newSize = when (mmExtendable handle) $ do
   let sizeVar = mmFileSize handle
       ptrVar = mmData handle
+      page = mmLockPageSize handle
   ptr <- atomically $ readTVar ptrVar
   oldSize <- atomically $ readTVar sizeVar
   let delta :: Int64
@@ -74,16 +75,17 @@ extendFile handle newSize = when (mmExtendable handle) $ do
         -- Write zeros to the end
         size <- hFileSize h
         hSeek h AbsoluteSeek size
-        B.hPut h $ B.replicate (fromIntegral delta) 0
+        B.hPut h $ B.replicate (fromIntegral page) 0
         hFlush h
         fd <- handleToFd h
         -- MMap file again
-        ptr' <- mmap (fromIntegral newSize) fd
+        let newSize' = oldSize + fromIntegral page
+        ptr' <- mmap (fromIntegral newSize') fd
 
         atomically $ do
           writeTVar (mmFile handle) fd
           writeTVar ptrVar ptr'
-          writeTVar sizeVar (fromIntegral newSize)
+          writeTVar sizeVar (fromIntegral newSize')
 
 instance FileAccess MMaped where
   data AccessParams MMaped = MMapedParams Size Bool
