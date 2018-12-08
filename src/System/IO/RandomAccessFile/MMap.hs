@@ -115,20 +115,26 @@ instance FileAccess MMaped where
     return $ MMaped fdVar path ptrVar extendable sizeVar lockPageSize locks resizeLock
 
   readBytes handle offset size = do
-    let ptrVar = mmData handle
-        lockPageSize = mmLockPageSize handle
-        locks = mmLocks handle
-    ptr <- atomically $ readTVar ptrVar
-    let dataOffset0 = offset `mod` lockPageSize
-        pageOffset0 = offset - dataOffset0
-        dataOffset1 = (offset + size) `mod` lockPageSize
-        pageOffset1 = (offset + size) - dataOffset1
-        pageOffsets = [pageOffset0, pageOffset0 + lockPageSize .. pageOffset1]
+    withLock_ (mmExtendable handle) (mmResizeLock handle) ReadAccess $ do -- just check that file is not currently being resized
+      let ptrVar = mmData handle
+          lockPageSize = mmLockPageSize handle
+          locks = mmLocks handle
+      (ptr, fsize) <- atomically $ do
+                        p <- readTVar ptrVar
+                        s <- readTVar (mmFileSize handle)
+                        return (p, s)
+      when (offset + size > fromIntegral fsize) $
+        fail $ printf "readBytes: read after EOF: offset %d, size %s, file size %s" offset (show size) (show fsize)
+      let dataOffset0 = offset `mod` lockPageSize
+          pageOffset0 = offset - dataOffset0
+          dataOffset1 = (offset + size) `mod` lockPageSize
+          pageOffset1 = (offset + size) - dataOffset1
+          pageOffsets = [pageOffset0, pageOffset0 + lockPageSize .. pageOffset1]
 
-    withLock_ (mmExtendable handle) (mmResizeLock handle) ReadAccess $ -- just check that file is not currently being resized
       underBlockLocks locks ReadAccess pageOffsets $ do
         let bstrPtr = plusPtr ptr (fromIntegral offset)
-        unsafePackCStringLen (bstrPtr, fromIntegral size)
+        --  unsafePackCStringLen (bstrPtr, fromIntegral size)
+        B.packCStringLen (bstrPtr, fromIntegral size)
 
   writeBytes handle offset bstr = do
     let ptrVar = mmData handle
